@@ -1,0 +1,32 @@
+# The docker compose yaml of all time
+
+services:
+
+  data_warehouse:
+    container_name: data_warehouse
+    image: mysql
+    restart: always
+    ports:
+      - 3306:3306
+    volumes:
+      - ./data_warehouse:/var/lib/mysql      
+    environment:
+      MYSQL_ROOT_PASSWORD: "password"
+  mongo_db:
+    container_name: mongo_db
+    image: mongo
+    restart: always
+    ports:
+      - 27017:27017
+    volumes:
+      - ./mongo_db:/data/db
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: "root"
+      MONGO_INITDB_ROOT_PASSWORD: "password"
+  cloudbeaver:
+    container_name: cloudbeaver
+    image: cloudbeaver-ee
+    restart: always
+    ports:
+      - 8978:8978
+  
