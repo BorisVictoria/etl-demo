@@ -9,10 +9,20 @@ import pymysql
 import pandas as pd
 import numpy as np
 
+pd.set_option('display.max_columns', None)
+'''
+    For the exploratory data analysis, use df.info() to see the column headers, df[df.duplicated(keep=False)] to check all duplicates
+    and df[df.duplicated(subset=['col1', 'col2', 'coln'], keep=False) to check duplicates against the composite primary key
+'''
 def load_csv_pipeline(path):
     
     if 'goDailySales' in path:
         df = pd.read_csv(path, sep=';')
+        df = df.drop_duplicates()
+        df = df.groupby(['Retailer code', 'Product number', 'Order method code', 'Date', 'Unit price', 'Unit sale price'], as_index=False).agg({'Quantity': 'sum'})
+        # print(df.info())
+        # print(df[df.duplicated(keep=False)])
+        # print(df[df.duplicated(subset=['Retailer code', 'Product number', 'Order method code', 'Date', 'Unit price', 'Unit sale price'], keep=False)])
         df['Date'] = pd.to_datetime(df['Date'])
         create_table = '''
             use go_sales;
@@ -25,6 +35,7 @@ def load_csv_pipeline(path):
                 quantity int,
                 unit_price double,
                 unit_sale_price double,
+                primary key(retailer_code, product_number, order_method_code, date, unit_price, unit_sale_price),
                 foreign key(retailer_code)
                     references go_retailers(retailer_code),
                 foreign key(product_number)
@@ -43,6 +54,9 @@ def load_csv_pipeline(path):
         
     elif 'goMethods' in path:
         df = pd.read_csv(path, sep=';')
+        # print(df.info())
+        # print(df[df.duplicated(keep=False)])
+        # print(df[df.duplicated(subset=['Order method code'], keep=False)])
         create_table = '''
             use go_sales;
             drop table if exists go_methods;
@@ -62,6 +76,9 @@ def load_csv_pipeline(path):
         
     elif 'goProducts' in path:
         df = pd.read_csv(path, sep=';')
+        # print(df.info())
+        # print(df[df.duplicated(keep=False)])
+        # print(df[df.duplicated(subset=['Product number'], keep=False)])
         create_table = '''
             use go_sales;
             drop table if exists go_products;
@@ -87,6 +104,9 @@ def load_csv_pipeline(path):
         
     elif 'goRetailers' in path:
         df = pd.read_csv(path)
+        # print(df.info())
+        # print(df[df.duplicated(keep=False)])
+        # print(df[df.duplicated(subset=['Retailer code'], keep=False)])
         create_table = '''
             use go_sales;
             drop table if exists go_retailers;
@@ -108,6 +128,9 @@ def load_csv_pipeline(path):
         
     elif 'Consumer-complaints' in path:
         df = pd.read_csv(path, index_col=[0])
+        # print(df.info())
+        # print(df[df.duplicated(keep=False)])
+        # print(df[df.duplicated(subset=['Complaint ID'], keep=False)])
         df['Date received'] = pd.to_datetime(df['Date received'])
         df['Date sent to company'] = pd.to_datetime(df['Date sent to company'])
         df = df.replace({np.nan: None})
@@ -168,7 +191,6 @@ def load_csv_pipeline(path):
    purchaseMethod: string
 '''
 def load_json_pipeline(path):
-    
     proc = subprocess.run(["mongoimport", 
                           "--db=supplies", 
                           "--collection=supplies",
