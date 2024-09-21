@@ -253,95 +253,46 @@ def load_json_pipeline(path):
         insert into supplies_order_item_tags values (%s, %s, %s)
     '''
     
+    # Normalize JSON data
     df = pd.json_normalize(list(documents))
-    # print(df.head())
 
+    # Create sales DataFrame
     df_sales = df.drop(columns=['items'])
-    df_sales['id'] = range(1, len(df_sales) + 1)
-    # print(df_sales.head())
+    df_sales.insert(0, 'id', range(1, len(df_sales) + 1))
 
-    df_items = df[['items', '_id']]
-    df_items = df_items.explode('items')
-    df_items = pd.concat([df_items.drop('items', axis=1), df_items['items'].apply(pd.Series)], axis=1)
-    # print(df_items.head())
-    
-    df_items = df_items.merge(df_sales[['_id', 'id']], left_on='_id', right_on='_id', how='left')
-    df_items.rename(columns={'id': 'order_id'}, inplace = True)
-    df_items['id'] = range(1, len(df_items) + 1)
-    # print(df_items.head(15))
+    # Create items DataFrame, explode items, and normalize JSON directly
+    df_items = df[['items', '_id']].explode('items')
+    df_items = df_items.join(pd.json_normalize(df_items.pop('items')))
 
+    # Merge with sales to get 'order_id'
+    df_items = df_items.merge(df_sales[['_id', 'id']], on='_id').rename(columns={'id': 'order_id'})
+
+    # Assign item 'id' and drop '_id'
+    df_items.insert(0, 'id', range(1, len(df_items) + 1))
     df_sales = df_sales.drop(columns=['_id'])
     df_items = df_items.drop(columns=['_id'])
-    # print(df_sales.head(10))
-    # print(df_items.head(10))
 
-    df_tags = df_items[['tags', 'id']]
+    # Handle tags and explode them into their own DataFrame
+    df_tags = df_items[['tags', 'id']].explode('tags').rename(columns={'id': 'item_id'})
+    df_tags.insert(0, 'id', range(1, len(df_tags) + 1))
+
+    # Drop tags column from items
     df_items = df_items.drop(columns=['tags'])
-    df_tags = df_tags.explode('tags')
-    df_tags.rename(columns={'id': 'item_id'}, inplace=True)
-    df_tags['id'] = range(1, len(df_tags) + 1)
-    #  print(df_tags.head(10))
 
+    # SQL operations
     cursor.execute(create_table)
 
     df_sales = df_sales[['id', 'saleDate', 'storeLocation', 'customer.email', 'customer.gender',
-        'customer.age', 'customer.satisfaction', 'couponUsed', 'purchaseMethod'
-    ]]
+                         'customer.age', 'customer.satisfaction', 'couponUsed', 'purchaseMethod']]
 
     df_items = df_items[['id', 'order_id', 'name', 'price', 'quantity']]
-
     df_tags = df_tags[['id', 'item_id', 'tags']]
 
-    # print(df_sales.head())
-    # print(df_items.head())
-    # print(df_tags.head())
-
-    sales = [tuple(row) for row in df_sales.to_numpy()]
-    cursor.executemany(insert_supplies_orders, sales)
-
-    items = [tuple(row) for row in df_items.to_numpy()]
-    cursor.executemany(insert_supplies_order_items, items)
-
-    tags = [tuple(row) for row in df_tags.to_numpy()]
-    cursor.executemany(insert_supplies_order_item_tags, tags)
-
-    # i = 0    
-    # j = 0
-    # k = 0
-    
-    # for document in documents:
-    #     tuple = (
-    #         i,
-    #         document['saleDate'],
-    #         document['storeLocation'],
-    #         document['customer']['email'],
-    #         document['customer']['gender'],
-    #         document['customer']['age'],
-    #         document['customer']['satisfaction'],
-    #         document['couponUsed'],
-    #         document['purchaseMethod']
-    #     )
-    #     cursor.execute(insert_supplies_orders, tuple)
-    #     for item in document['items']:
-    #         tuple = (
-    #             j,
-    #             i,
-    #             item['name'],
-    #             item['price'],
-    #             item['quantity']
-    #         )
-    #         cursor.execute(insert_supplies_order_items, tuple)
-    #         for tag in item['tags']:
-    #             tuple = (
-    #                 k,
-    #                 j,
-    #                 tag
-    #             )
-    #             cursor.execute(insert_supplies_order_item_tags, tuple)
-    #             k += 1
-    #         j += 1
-    #     i += 1    
-    
+    # Execute SQL insertions
+    cursor.executemany(insert_supplies_orders, df_sales.to_numpy().tolist())
+    cursor.executemany(insert_supplies_order_items, df_items.to_numpy().tolist())
+    cursor.executemany(insert_supplies_order_item_tags, df_tags.to_numpy().tolist())
+  
     print(f"Succesfully loaded json: {path}")
     return
 
