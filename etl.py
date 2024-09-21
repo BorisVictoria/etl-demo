@@ -262,8 +262,10 @@ def load_json_pipeline(path):
 
     # Create items DataFrame, explode items, and normalize JSON directly
     df_items = df[['items', '_id']].explode('items')
-    df_items = df_items.join(pd.json_normalize(df_items.pop('items')))
-
+    df_normalized = pd.json_normalize(df_items['items'])
+    df_normalized['_id'] = df_items['_id'].values 
+    df_items = df_normalized
+    
     # Merge with sales to get 'order_id'
     df_items = df_items.merge(df_sales[['_id', 'id']], on='_id').rename(columns={'id': 'order_id'})
 
