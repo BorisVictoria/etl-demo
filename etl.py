@@ -326,14 +326,15 @@ print('Welcome to the ETL script of all time')
 # Connect to databases
 MONGO_URI = 'mongodb://root:password@localhost:27017/'
 mongo = pymongo.MongoClient(MONGO_URI)
-warehouse = pymysql.connect(host='localhost',
+mysql = pymysql.connect(host='localhost',
                         user='root',
+                        port=3307,
                         password='password',
                         client_flag=pymysql.constants.CLIENT.MULTI_STATEMENTS)
 
-cursor = warehouse.cursor()
+cursor = mysql.cursor()
 # Initial database setup for MySQL data warehouse
-table_init = '''
+database_init = '''
     drop database if exists go_sales;
     create database go_sales;
 
@@ -347,7 +348,7 @@ table_init = '''
     create database supplies;
 '''
 
-cursor.execute(table_init)
+cursor.execute(database_init)
 
 for file in files:
     if re.search(r'.csv', file):
@@ -359,6 +360,33 @@ for file in files:
     else:
         print("What in the fuck is that")
 
+mysql.commit()
+cursor.close()
+mysql.close()
+
+
+# Dump everything to warehouse pipeline
+
+warehouse = pymysql.connect(host='localhost',
+                        user='root',
+                        port=3306,
+                        password='password',
+                        client_flag=pymysql.constants.CLIENT.MULTI_STATEMENTS)
+cursor = warehouse.cursor()
+cursor.execute(database_init)
+
 warehouse.commit()
 cursor.close()
 warehouse.close()
+
+databases = ['consumer_complaints', 'employees', 'go_sales', 'supplies']
+
+print("Transferring data to warehouse...")
+
+for database in databases:
+    subprocess.run(f"mysqldump -u root -p'password' -h localhost -P 3307 {database} > {database}.sql", shell=True, check=True)
+
+for database in databases:   
+    subprocess.run(f"mysql -u root -p'password' -h localhost -P 3306 {database} < {database}.sql", shell=True, check=True)
+
+print("Transfer complete!")

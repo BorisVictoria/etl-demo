@@ -21,7 +21,8 @@
             ps.matplotlib
           ]))
 
-          # MySQL  
+          # MySQL
+          mysql
           mysql-shell-innovation
 
           # MongoDB

@@ -1,3 +1,4 @@
 data_warehouse
 mongo_db
 mysql_db
+*.sql
