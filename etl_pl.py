@@ -5,11 +5,14 @@ import subprocess
 
 import pymongo
 import pymysql
+import time
 
 import pandas as pd
 import polars as pl
 import numpy as np
 
+pl.Config(tbl_cols=20)
+pl.Config(tbl_rows=20)
 '''
     Use polars equivalent for better performance
 '''
@@ -183,6 +186,7 @@ def load_json_pipeline(path):
                           "--collection=supplies",
                           "--file=" + path,
                           "--drop",
+                          "--numInsertionWorkers=12",
                           "--authenticationDatabase=admin",
                           "--uri=" + MONGO_URI], text=True, stdout=subprocess.PIPE)
     print(proc.stdout)    
@@ -226,7 +230,6 @@ def load_json_pipeline(path):
     '''
     db = mongo['supplies']
     collection = db['supplies']
-    documents = collection.find()
 
     insert_supplies_orders = '''
        insert into supplies_orders values (%s, %s, %s, %s, %s, %s, %s, %s, %s)
@@ -240,45 +243,77 @@ def load_json_pipeline(path):
         insert into supplies_order_item_tags values (%s, %s, %s)
     '''
     
-    # Normalize JSON data
-    df = pd.json_normalize(list(documents))
+    pipeline = [
+        {
+            "$project": {
+                "_id": { "$toString": "$_id" },  # Convert ObjectId to string
+                "saleDate": 1,  # Pass through saleDate as is
+                "storeLocation": 1,  # Pass through storeLocation
+                "customer": 1,  # Pass through customer data
+                "couponUsed": 1,  # Pass through couponUsed
+                "purchaseMethod": 1,  # Pass through purchaseMethod
+            
+                # Convert price in items array from Decimal128 to double
+                "items": {
+                    "$map": {
+                        "input": "$items",
+                        "as": "item",
+                        "in": {
+                            "name": "$$item.name",  # Pass through name
+                            "tags": "$$item.tags",  # Pass through tags
+                            "quantity": "$$item.quantity",  # Pass through quantity
+                            "price": { "$toDouble": "$$item.price" }  # Convert Decimal128 price to float
+                        }
+                    }
+                }
+            }
+        }
+    ]
+
+    # Run the aggregation pipeline
+    documents = collection.aggregate(pipeline)
+
+    df = pl.json_normalize(list(documents))
 
     # Create sales DataFrame
-    df_sales = df.drop(columns=['items'])
-    df_sales.insert(0, 'id', range(1, len(df_sales) + 1))
+    df_sales = df.drop('items').with_columns(pl.Series('id', range(1, len(df) + 1)))
+    
+    # Create items DataFrame, explode items, merge with df_sales on _id, drop _id, rename id to order_id, create id
+    df_items = df.select(['items', '_id']) \
+                .explode('items').unnest('items') \
+                .join(df_sales.select(['_id', 'id']), left_on='_id', right_on='_id', how='left') \
+                .drop('_id') \
+                .rename({'id': 'order_id'})
+                
+    df_items = df_items.with_columns(
+                    pl.Series('id', range(1, len(df_items) + 1))
+                )
 
-    # Create items DataFrame, explode items, and normalize JSON directly
-    df_items = df[['items', '_id']].explode('items')
-    df_items = pd.concat([df_items, pd.json_normalize(df_items.pop('items')).set_index(df_items.index)], axis=1)
+    df_sales = df_sales.drop(['_id'])
 
-    # Merge with sales to get 'order_id'
-    df_items = df_items.merge(df_sales[['_id', 'id']], on='_id').rename(columns={'id': 'order_id'})
+    df_tags = df_items.select(['tags', 'id']) \
+                .explode('tags') \
+                .rename({'id': 'item_id'})
 
-    # Assign item 'id' and drop '_id'
-    df_items.insert(0, 'id', range(1, len(df_items) + 1))
-    df_sales = df_sales.drop(columns=['_id'])
-    df_items = df_items.drop(columns=['_id'])
+    df_tags = df_tags.with_columns(
+        pl.Series('id', range(1, len(df_tags) + 1))
+    )
 
-    # Handle tags and explode them into their own DataFrame
-    df_tags = df_items[['tags', 'id']].explode('tags').rename(columns={'id': 'item_id'})
-    df_tags.insert(0, 'id', range(1, len(df_tags) + 1))
-
-    # Drop tags column from items
-    df_items = df_items.drop(columns=['tags'])
+    df_items = df_items.drop('tags')
 
     # SQL operations
     cursor.execute(create_table)
 
-    df_sales = df_sales[['id', 'saleDate', 'storeLocation', 'customer.email', 'customer.gender',
-                         'customer.age', 'customer.satisfaction', 'couponUsed', 'purchaseMethod']]
+    df_sales = df_sales.select(['id', 'saleDate', 'storeLocation', 'customer.email', 'customer.gender',
+                         'customer.age', 'customer.satisfaction', 'couponUsed', 'purchaseMethod'])
 
-    df_items = df_items[['id', 'order_id', 'name', 'price', 'quantity']]
-    df_tags = df_tags[['id', 'item_id', 'tags']]
+    df_items = df_items.select(['id', 'order_id', 'name', 'price', 'quantity'])
+    df_tags = df_tags.select(['id', 'item_id', 'tags'])
 
     # Execute SQL insertions
-    cursor.executemany(insert_supplies_orders, df_sales.to_numpy().tolist())
-    cursor.executemany(insert_supplies_order_items, df_items.to_numpy().tolist())
-    cursor.executemany(insert_supplies_order_item_tags, df_tags.to_numpy().tolist())
+    cursor.executemany(insert_supplies_orders, df_sales.rows())
+    cursor.executemany(insert_supplies_order_items, df_items.rows())
+    cursor.executemany(insert_supplies_order_item_tags, df_tags.rows())
   
     print(f"Succesfully loaded json: {path}")
     return
@@ -299,6 +334,8 @@ files = [
     'lake/HO1Data-Mongo-sales.json',
     'lake/Sample DB - employees.sql',
 ]
+
+t0 = time.time()
 
 print('Welcome to the ETL script of all time')
 
@@ -369,3 +406,7 @@ for database in databases:
     subprocess.run(f"mysql -u root -p'password' -h localhost -P 3306 {database} < {database}.sql", shell=True, check=True)
 
 print("Transfer complete!")
+
+t1 = time.time()
+
+print("Time elapsed: " + str(t1-t0))

@@ -6,6 +6,7 @@ import subprocess
 import pymongo
 import pymysql
 
+import time
 import pandas as pd
 import numpy as np
 
@@ -310,6 +311,7 @@ files = [
 
 print('Welcome to the ETL script of all time')
 
+t0 = time.time()
 # Connect to databases
 MONGO_URI = 'mongodb://root:password@localhost:27017/'
 mongo = pymongo.MongoClient(MONGO_URI)
@@ -377,3 +379,7 @@ for database in databases:
     subprocess.run(f"mysql -u root -p'password' -h localhost -P 3306 {database} < {database}.sql", shell=True, check=True)
 
 print("Transfer complete!")
+
+t1 = time.time()
+
+print("Time elapsed: " + str(t1-t0))

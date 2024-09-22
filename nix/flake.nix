@@ -14,6 +14,7 @@
           # Python Libraries
           (python3.withPackages (ps: [
             ps.streamlit
+            ps.pyarrow
             ps.pymysql
             ps.pymongo
             ps.pandas
