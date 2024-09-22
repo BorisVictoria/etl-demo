@@ -15,9 +15,9 @@
           (python3.withPackages (ps: [
             ps.streamlit
             ps.pymysql
-            ps.sqlalchemy
             ps.pymongo
             ps.pandas
+            ps.polars
             ps.matplotlib
           ]))
 

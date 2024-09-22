@@ -7,23 +7,19 @@ import pymongo
 import pymysql
 
 import pandas as pd
+import polars as pl
 import numpy as np
 
-pd.set_option('display.max_columns', None)
 '''
-    For the exploratory data analysis, use df.info() to see the column headers, df[df.duplicated(keep=False)] to check all duplicates
-    and df[df.duplicated(subset=['col1', 'col2', 'coln'], keep=False) to check duplicates against the composite primary key
+    Use polars equivalent for better performance
 '''
 def load_csv_pipeline(path):
     
     if 'goDailySales' in path:
-        df = pd.read_csv(path, sep=';')
-        df = df.drop_duplicates()
-        df = df.groupby(['Retailer code', 'Product number', 'Order method code', 'Date', 'Unit price', 'Unit sale price'], as_index=False).agg({'Quantity': 'sum'})
-        # print(df.info())
-        # print(df[df.duplicated(keep=False)])
-        # print(df[df.duplicated(subset=['Retailer code', 'Product number', 'Order method code', 'Date', 'Unit price', 'Unit sale price'], keep=False)])
-        df['Date'] = pd.to_datetime(df['Date'])
+        df = pl.read_csv(path, separator=';')
+        df = df.unique()
+        df = df.group_by(['Retailer code', 'Product number', 'Order method code', 'Date', 'Unit price', 'Unit sale price']).agg(pl.col('Quantity').sum())
+        df = df.with_columns(pl.col('Date').str.to_datetime("%Y-%m-%d"))
         create_table = '''
             use go_sales;
             drop table if exists go_daily_sales;
@@ -47,16 +43,13 @@ def load_csv_pipeline(path):
         insert_query = '''
             insert into go_daily_sales values (%s, %s, %s, %s, %s, %s, %s)
         '''
-        values = [tuple(row) for row in df.to_numpy()]
+        values = df.rows()
         
         cursor.execute(create_table)
         cursor.executemany(insert_query, values)
         
     elif 'goMethods' in path:
-        df = pd.read_csv(path, sep=';')
-        # print(df.info())
-        # print(df[df.duplicated(keep=False)])
-        # print(df[df.duplicated(subset=['Order method code'], keep=False)])
+        df = pl.read_csv(path, separator=';')
         create_table = '''
             use go_sales;
             drop table if exists go_methods;
@@ -69,16 +62,13 @@ def load_csv_pipeline(path):
         insert_query = '''
             insert into go_methods values (%s, %s)
         '''
-        values = [tuple(row) for row in df.to_numpy()]
+        values = df.rows()
         
         cursor.execute(create_table)
         cursor.executemany(insert_query, values)
         
     elif 'goProducts' in path:
-        df = pd.read_csv(path, sep=';')
-        # print(df.info())
-        # print(df[df.duplicated(keep=False)])
-        # print(df[df.duplicated(subset=['Product number'], keep=False)])
+        df = pl.read_csv(path, separator=';')
         create_table = '''
             use go_sales;
             drop table if exists go_products;
@@ -97,16 +87,13 @@ def load_csv_pipeline(path):
         insert_query = '''
             insert into go_products values (%s, %s, %s, %s, %s, %s, %s, %s)
         '''
-        values = [tuple(row) for row in df.to_numpy()]
+        values = df.rows()
         
         cursor.execute(create_table)
         cursor.executemany(insert_query, values)
         
     elif 'goRetailers' in path:
-        df = pd.read_csv(path)
-        # print(df.info())
-        # print(df[df.duplicated(keep=False)])
-        # print(df[df.duplicated(subset=['Retailer code'], keep=False)])
+        df = pl.read_csv(path)
         create_table = '''
             use go_sales;
             drop table if exists go_retailers;
@@ -121,19 +108,19 @@ def load_csv_pipeline(path):
         insert_query = '''
             insert into go_retailers values (%s, %s, %s, %s)
         '''
-        values = [tuple(row) for row in df.to_numpy()]
+        values = df.rows()
         
         cursor.execute(create_table)
         cursor.executemany(insert_query, values)
         
     elif 'Consumer-complaints' in path:
-        df = pd.read_csv(path, index_col=[0])
-        # print(df.info())
-        # print(df[df.duplicated(keep=False)])
-        # print(df[df.duplicated(subset=['Complaint ID'], keep=False)])
-        df['Date received'] = pd.to_datetime(df['Date received'])
-        df['Date sent to company'] = pd.to_datetime(df['Date sent to company'])
-        df = df.replace({np.nan: None})
+        df = pl.read_csv(path)       
+        df = df.with_columns([
+            pl.col('Date received').str.to_datetime('%Y-%m-%d'),
+            pl.col('Date sent to company').str.to_datetime('%Y-%m-%d')
+        ])
+        df = df.fill_nan(None)
+        df = df.drop('')
         create_table = '''
             use consumer_complaints;
             drop table if exists consumer_complaints;
@@ -157,8 +144,8 @@ def load_csv_pipeline(path):
         insert_query = '''
             insert into consumer_complaints values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         '''
-        values = [tuple(row) for row in df.to_numpy()]
-        
+        values = df.rows()
+
         cursor.execute(create_table)
         cursor.executemany(insert_query, values)
     else:
