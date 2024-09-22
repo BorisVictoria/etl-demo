@@ -47,10 +47,9 @@ def load_csv_pipeline(path):
         insert_query = '''
             insert into go_daily_sales values (%s, %s, %s, %s, %s, %s, %s)
         '''
-        values = [tuple(row) for row in df.to_numpy()]
         
         cursor.execute(create_table)
-        cursor.executemany(insert_query, values)
+        cursor.executemany(insert_query, df.to_numpy().tolist())
         
     elif 'goMethods' in path:
         df = pd.read_csv(path, sep=';')
@@ -69,10 +68,9 @@ def load_csv_pipeline(path):
         insert_query = '''
             insert into go_methods values (%s, %s)
         '''
-        values = [tuple(row) for row in df.to_numpy()]
         
         cursor.execute(create_table)
-        cursor.executemany(insert_query, values)
+        cursor.executemany(insert_query, df.to_numpy().tolist())
         
     elif 'goProducts' in path:
         df = pd.read_csv(path, sep=';')
@@ -97,10 +95,9 @@ def load_csv_pipeline(path):
         insert_query = '''
             insert into go_products values (%s, %s, %s, %s, %s, %s, %s, %s)
         '''
-        values = [tuple(row) for row in df.to_numpy()]
         
         cursor.execute(create_table)
-        cursor.executemany(insert_query, values)
+        cursor.executemany(insert_query, df.to_numpy().tolist())
         
     elif 'goRetailers' in path:
         df = pd.read_csv(path)
@@ -121,10 +118,9 @@ def load_csv_pipeline(path):
         insert_query = '''
             insert into go_retailers values (%s, %s, %s, %s)
         '''
-        values = [tuple(row) for row in df.to_numpy()]
         
         cursor.execute(create_table)
-        cursor.executemany(insert_query, values)
+        cursor.executemany(insert_query, df.to_numpy().tolist())
         
     elif 'Consumer-complaints' in path:
         df = pd.read_csv(path, index_col=[0])
@@ -157,10 +153,9 @@ def load_csv_pipeline(path):
         insert_query = '''
             insert into consumer_complaints values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         '''
-        values = [tuple(row) for row in df.to_numpy()]
         
         cursor.execute(create_table)
-        cursor.executemany(insert_query, values)
+        cursor.executemany(insert_query, df.to_numpy().tolist())
     else:
         print("You missed a csv kekw")
                 
