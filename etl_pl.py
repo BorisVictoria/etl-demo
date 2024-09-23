@@ -5,26 +5,24 @@ import subprocess
 
 import pymongo
 import pymysql
-
 import time
+
 import pandas as pd
+import polars as pl
 import numpy as np
 
-pd.set_option('display.max_columns', None)
+pl.Config(tbl_cols=20)
+pl.Config(tbl_rows=20)
 '''
-    For the exploratory data analysis, use df.info() to see the column headers, df[df.duplicated(keep=False)] to check all duplicates
-    and df[df.duplicated(subset=['col1', 'col2', 'coln'], keep=False) to check duplicates against the composite primary key
+    Use polars equivalent for better performance
 '''
 def load_csv_pipeline(path):
     
     if 'goDailySales' in path:
-        df = pd.read_csv(path, sep=';')
-        df = df.drop_duplicates()
-        df = df.groupby(['Retailer code', 'Product number', 'Order method code', 'Date', 'Unit price', 'Unit sale price'], as_index=False).agg({'Quantity': 'sum'})
-        # print(df.info())
-        # print(df[df.duplicated(keep=False)])
-        # print(df[df.duplicated(subset=['Retailer code', 'Product number', 'Order method code', 'Date', 'Unit price', 'Unit sale price'], keep=False)])
-        df['Date'] = pd.to_datetime(df['Date'])
+        df = pl.read_csv(path, separator=';')
+        df = df.unique()
+        df = df.group_by(['Retailer code', 'Product number', 'Order method code', 'Date', 'Unit price', 'Unit sale price']).agg(pl.col('Quantity').sum())
+        df = df.with_columns(pl.col('Date').str.to_datetime("%Y-%m-%d"))
         create_table = '''
             use go_sales;
             drop table if exists go_daily_sales;
@@ -48,15 +46,13 @@ def load_csv_pipeline(path):
         insert_query = '''
             insert into go_daily_sales values (%s, %s, %s, %s, %s, %s, %s)
         '''
+        values = df.rows()
         
         cursor.execute(create_table)
-        cursor.executemany(insert_query, df.to_numpy().tolist())
+        cursor.executemany(insert_query, values)
         
     elif 'goMethods' in path:
-        df = pd.read_csv(path, sep=';')
-        # print(df.info())
-        # print(df[df.duplicated(keep=False)])
-        # print(df[df.duplicated(subset=['Order method code'], keep=False)])
+        df = pl.read_csv(path, separator=';')
         create_table = '''
             use go_sales;
             drop table if exists go_methods;
@@ -69,15 +65,13 @@ def load_csv_pipeline(path):
         insert_query = '''
             insert into go_methods values (%s, %s)
         '''
+        values = df.rows()
         
         cursor.execute(create_table)
-        cursor.executemany(insert_query, df.to_numpy().tolist())
+        cursor.executemany(insert_query, values)
         
     elif 'goProducts' in path:
-        df = pd.read_csv(path, sep=';')
-        # print(df.info())
-        # print(df[df.duplicated(keep=False)])
-        # print(df[df.duplicated(subset=['Product number'], keep=False)])
+        df = pl.read_csv(path, separator=';')
         create_table = '''
             use go_sales;
             drop table if exists go_products;
@@ -96,15 +90,13 @@ def load_csv_pipeline(path):
         insert_query = '''
             insert into go_products values (%s, %s, %s, %s, %s, %s, %s, %s)
         '''
+        values = df.rows()
         
         cursor.execute(create_table)
-        cursor.executemany(insert_query, df.to_numpy().tolist())
+        cursor.executemany(insert_query, values)
         
     elif 'goRetailers' in path:
-        df = pd.read_csv(path)
-        # print(df.info())
-        # print(df[df.duplicated(keep=False)])
-        # print(df[df.duplicated(subset=['Retailer code'], keep=False)])
+        df = pl.read_csv(path)
         create_table = '''
             use go_sales;
             drop table if exists go_retailers;
@@ -119,18 +111,19 @@ def load_csv_pipeline(path):
         insert_query = '''
             insert into go_retailers values (%s, %s, %s, %s)
         '''
+        values = df.rows()
         
         cursor.execute(create_table)
-        cursor.executemany(insert_query, df.to_numpy().tolist())
+        cursor.executemany(insert_query, values)
         
     elif 'Consumer-complaints' in path:
-        df = pd.read_csv(path, index_col=[0])
-        # print(df.info())
-        # print(df[df.duplicated(keep=False)])
-        # print(df[df.duplicated(subset=['Complaint ID'], keep=False)])
-        df['Date received'] = pd.to_datetime(df['Date received'])
-        df['Date sent to company'] = pd.to_datetime(df['Date sent to company'])
-        df = df.replace({np.nan: None})
+        df = pl.read_csv(path)       
+        df = df.with_columns([
+            pl.col('Date received').str.to_datetime('%Y-%m-%d'),
+            pl.col('Date sent to company').str.to_datetime('%Y-%m-%d')
+        ])
+        df = df.fill_nan(None)
+        df = df.drop('')
         create_table = '''
             use consumer_complaints;
             drop table if exists consumer_complaints;
@@ -154,9 +147,10 @@ def load_csv_pipeline(path):
         insert_query = '''
             insert into consumer_complaints values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         '''
-        
+        values = df.rows()
+
         cursor.execute(create_table)
-        cursor.executemany(insert_query, df.to_numpy().tolist())
+        cursor.executemany(insert_query, values)
     else:
         print("You missed a csv kekw")
                 
@@ -192,6 +186,7 @@ def load_json_pipeline(path):
                           "--collection=supplies",
                           "--file=" + path,
                           "--drop",
+                          "--numInsertionWorkers=12",
                           "--authenticationDatabase=admin",
                           "--uri=" + MONGO_URI], text=True, stdout=subprocess.PIPE)
     print(proc.stdout)    
@@ -235,7 +230,6 @@ def load_json_pipeline(path):
     '''
     db = mongo['supplies']
     collection = db['supplies']
-    documents = collection.find()
 
     insert_supplies_orders = '''
        insert into supplies_orders values (%s, %s, %s, %s, %s, %s, %s, %s, %s)
@@ -249,45 +243,77 @@ def load_json_pipeline(path):
         insert into supplies_order_item_tags values (%s, %s, %s)
     '''
     
-    # Normalize JSON data
-    df = pd.json_normalize(list(documents))
+    pipeline = [
+        {
+            "$project": {
+                "_id": { "$toString": "$_id" },  # Convert ObjectId to string
+                "saleDate": 1,  # Pass through saleDate as is
+                "storeLocation": 1,  # Pass through storeLocation
+                "customer": 1,  # Pass through customer data
+                "couponUsed": 1,  # Pass through couponUsed
+                "purchaseMethod": 1,  # Pass through purchaseMethod
+            
+                # Convert price in items array from Decimal128 to double
+                "items": {
+                    "$map": {
+                        "input": "$items",
+                        "as": "item",
+                        "in": {
+                            "name": "$$item.name",  # Pass through name
+                            "tags": "$$item.tags",  # Pass through tags
+                            "quantity": "$$item.quantity",  # Pass through quantity
+                            "price": { "$toDouble": "$$item.price" }  # Convert Decimal128 price to float
+                        }
+                    }
+                }
+            }
+        }
+    ]
+
+    # Run the aggregation pipeline
+    documents = collection.aggregate(pipeline)
+
+    df = pl.json_normalize(list(documents))
 
     # Create sales DataFrame
-    df_sales = df.drop(columns=['items'])
-    df_sales.insert(0, 'id', range(1, len(df_sales) + 1))
+    df_sales = df.drop('items').with_columns(pl.Series('id', range(1, len(df) + 1)))
+    
+    # Create items DataFrame, explode items, merge with df_sales on _id, drop _id, rename id to order_id, create id
+    df_items = df.select(['items', '_id']) \
+                .explode('items').unnest('items') \
+                .join(df_sales.select(['_id', 'id']), left_on='_id', right_on='_id', how='left') \
+                .drop('_id') \
+                .rename({'id': 'order_id'})
+                
+    df_items = df_items.with_columns(
+                    pl.Series('id', range(1, len(df_items) + 1))
+                )
 
-    # Create items DataFrame, explode items, and normalize JSON directly
-    df_items = df[['items', '_id']].explode('items')
-    df_items = pd.concat([df_items, pd.json_normalize(df_items.pop('items')).set_index(df_items.index)], axis=1)
+    df_sales = df_sales.drop(['_id'])
 
-    # Merge with sales to get 'order_id'
-    df_items = df_items.merge(df_sales[['_id', 'id']], on='_id').rename(columns={'id': 'order_id'})
+    df_tags = df_items.select(['tags', 'id']) \
+                .explode('tags') \
+                .rename({'id': 'item_id'})
 
-    # Assign item 'id' and drop '_id'
-    df_items.insert(0, 'id', range(1, len(df_items) + 1))
-    df_sales = df_sales.drop(columns=['_id'])
-    df_items = df_items.drop(columns=['_id'])
+    df_tags = df_tags.with_columns(
+        pl.Series('id', range(1, len(df_tags) + 1))
+    )
 
-    # Handle tags and explode them into their own DataFrame
-    df_tags = df_items[['tags', 'id']].explode('tags').rename(columns={'id': 'item_id'})
-    df_tags.insert(0, 'id', range(1, len(df_tags) + 1))
-
-    # Drop tags column from items
-    df_items = df_items.drop(columns=['tags'])
+    df_items = df_items.drop('tags')
 
     # SQL operations
     cursor.execute(create_table)
 
-    df_sales = df_sales[['id', 'saleDate', 'storeLocation', 'customer.email', 'customer.gender',
-                         'customer.age', 'customer.satisfaction', 'couponUsed', 'purchaseMethod']]
+    df_sales = df_sales.select(['id', 'saleDate', 'storeLocation', 'customer.email', 'customer.gender',
+                         'customer.age', 'customer.satisfaction', 'couponUsed', 'purchaseMethod'])
 
-    df_items = df_items[['id', 'order_id', 'name', 'price', 'quantity']]
-    df_tags = df_tags[['id', 'item_id', 'tags']]
+    df_items = df_items.select(['id', 'order_id', 'name', 'price', 'quantity'])
+    df_tags = df_tags.select(['id', 'item_id', 'tags'])
 
     # Execute SQL insertions
-    cursor.executemany(insert_supplies_orders, df_sales.to_numpy().tolist())
-    cursor.executemany(insert_supplies_order_items, df_items.to_numpy().tolist())
-    cursor.executemany(insert_supplies_order_item_tags, df_tags.to_numpy().tolist())
+    cursor.executemany(insert_supplies_orders, df_sales.rows())
+    cursor.executemany(insert_supplies_order_items, df_items.rows())
+    cursor.executemany(insert_supplies_order_item_tags, df_tags.rows())
   
     print(f"Succesfully loaded json: {path}")
     return
@@ -309,9 +335,10 @@ files = [
     'lake/Sample DB - employees.sql',
 ]
 
+t0 = time.time()
+
 print('Welcome to the ETL script of all time')
 
-t0 = time.time()
 # Connect to databases
 MONGO_URI = 'mongodb://root:password@localhost:27017/'
 mongo = pymongo.MongoClient(MONGO_URI)

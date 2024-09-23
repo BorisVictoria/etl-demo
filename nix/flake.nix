@@ -14,14 +14,16 @@
           # Python Libraries
           (python3.withPackages (ps: [
             ps.streamlit
+            ps.pyarrow
             ps.pymysql
-            ps.sqlalchemy
             ps.pymongo
             ps.pandas
+            ps.polars
             ps.matplotlib
           ]))
 
-          # MySQL  
+          # MySQL
+          mysql
           mysql-shell-innovation
 
           # MongoDB
